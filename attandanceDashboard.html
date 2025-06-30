@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Employee Attendance Portal</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <style>
+    .header {
+      background: linear-gradient(to right, #ff19c977, #1033e377);
+      color: white;
+      padding: 1rem;
+      text-align: center;
+    }
+    .card:hover {
+      transform: scale(1.05);
+    }
+  </style>
+</head>
+<body class="bg-light">
+  <div class="container mt-4">
+    <h3 class="header mb-3">Employee Attendance Portal</h3>
+
+    <!-- Summary Cards -->
+    <div class="row mb-3 text-center">
+      <div class="col-md-3"><div class="card shadow bg-white"><div class="card-body">
+        <h6>Total Employees</h6><h4 id="totalEmployees">0</h4>
+      </div></div></div>
+      <div class="col-md-3"><div class="card shadow bg-white"><div class="card-body">
+        <h6>Currently Active</h6><h4 id="currentlyActive">0</h4>
+      </div></div></div>
+      <div class="col-md-3"><div class="card shadow bg-white"><div class="card-body">
+        <h6>Present Today</h6><h4 id="presentToday">0</h4>
+      </div></div></div>
+      <div class="col-md-3"><div class="card shadow bg-white"><div class="card-body">
+        <h6>Avg Hours / Employee</h6><h4 id="averageHours">00:00:00</h4>
+      </div></div></div>
+    </div>
+
+    <!-- Filters + Clear Button -->
+    <div class="row mb-3">
+      <div class="col-md-3">
+        <input type="text" id="employeeId" class="form-control" placeholder="Filter by Employee ID"/>
+        <small id="employeeIdError" class="text-danger"></small>
+      </div>
+      <div class="col-md-3">
+        <select id="filterStatus" class="form-select">
+          <option value="">All Status</option>
+          <option value="In">In</option>
+          <option value="Out">Out</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+  <input type="date" id="filterDate" class="form-control"/>
+</div>
+      <div class="col-md-3">
+        <button class="btn btn-danger" onclick="clearToday()">Clear Today’s Data</button>
+      </div>
+    </div>
+
+    <!-- Attendance Table -->
+    <div class="table-responsive">
+      <table class="table table-bordered">
+        <thead>
+          <tr>
+            <th>Emp ID</th><th>Date</th><th>Punch In</th>
+            <th>Punch Out</th><th>Hours</th><th>Status</th><th>Attendance</th>
+          </tr>
+        </thead>
+        <tbody id="attendanceTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = 'http://localhost:8080/api/attendance';
+    let attendanceData = [];
+
+    async function loadTodayData() {
+      try {
+        const resp = await fetch(API_URL);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        attendanceData = await resp.json();
+        console.log("Fetched:", attendanceData);
+      } catch (e) {
+        console.error("Load error:", e);
+        attendanceData = [];
+      }
+      renderTable();
+    }
+
+   function formatDuration(iso) {
+  if (!iso) return '-';
+  const m = iso.match(/^PT(?:([\d.]+)H)?(?:([\d.]+)M)?(?:([\d.]+)S)?$/i);
+  if (!m) return iso;
+  const H = parseFloat(m[1] || 0);
+  const M = parseFloat(m[2] || 0);
+  const S = parseFloat(m[3] || 0);
+  return `${Math.floor(H)}h${Math.floor(M)}m${Math.floor(S)}s`;
+}
+
+
+    function renderTable() {
+      const tbody = document.getElementById("attendanceTableBody");
+      tbody.innerHTML = "";
+
+      const idFilter = document.getElementById("employeeId").value.trim().toUpperCase();
+      const statusFilter = document.getElementById("filterStatus").value;
+      const dateFilter = document.getElementById("filterDate").value;
+
+
+      const filtered = attendanceData.filter(r =>
+        (!idFilter || r.employeeId.includes(idFilter)) &&
+        (!statusFilter || r.status === statusFilter)&&
+         (!dateFilter || r.date === new Date(dateFilter).toLocaleDateString())
+      );
+
+      filtered.forEach(r => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${r.employeeId}</td>
+          <td>${r.date}</td>
+          <td>${r.inTime || '-'}</td>
+          <td>${r.outTime || '-'}</td>
+          <td>${formatDuration(r.duration)}</td>
+          <td style="color:${r.status==='In'?'green':'red'}">${r.status}</td>
+          <td>${r.attendance}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      updateSummaryCards(filtered);
+    }
+function parseTimeToDate(timeStr) {
+  // Normalize to milliseconds: trim to “.065” from “.065000”
+  const [h, m, s] = timeStr.split(':');
+  const secParts = s.split('.');
+  const seconds = secParts[0];
+  const millis = Math.round(parseFloat("0." + (secParts[1] || "0")) * 1000);
+  return new Date(`1970-01-01T${h.padStart(2,'0')}:${m.padStart(2,'0')}:${seconds.padStart(2,'0')}.${millis.toString().padStart(3,'0')}Z`);
+}
+
+  function updateSummaryCards(records) {
+    const uniqueIDs = new Set(records.map(r => r.employeeId)).size;
+  const activeNow = records.filter(r => r.inTime && !r.outTime).length;
+  const presentToday = records.filter(r => r.attendance === "Present").length;
+  const completed = records.filter(r => r.inTime && r.outTime);
+  const totalSec = completed.reduce((sum, r) => {
+    const dtIn = parseTimeToDate(r.inTime);
+    const dtOut = parseTimeToDate(r.outTime);
+    return sum + (dtOut - dtIn) / 1000;
+  }, 0);
+
+  let avgText = "00:00:00";
+  if (completed.length > 0) {
+    const avgSec = totalSec / completed.length;
+    const hrs = Math.floor(avgSec / 3600);
+    const mins = Math.floor((avgSec % 3600) / 60);
+    const secs = Math.floor(avgSec % 60);
+    avgText = `${String(hrs).padStart(2,'0')}:${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+  }
+
+  document.getElementById("totalEmployees").textContent = uniqueIDs;
+  document.getElementById("currentlyActive").textContent = activeNow;
+  document.getElementById("presentToday").textContent = presentToday;
+  document.getElementById("averageHours").textContent = avgText;
+}
+
+
+
+
+    async function clearToday() {
+      const today = new Date().toISOString().slice(0,10);
+      if (!confirm(`Delete all records for ${today}?`)) return;
+
+      try {
+        const resp = await fetch(`${API_URL}?date=${today}`, { method: 'DELETE' });
+        if (resp.ok) {
+          attendanceData = attendanceData.filter(r => r.date !== today);
+          renderTable();
+          alert("Today's data cleared.");
+        } else {
+          alert(`Delete failed: ${resp.status}`);
+        }
+      } catch (e) {
+        console.error(e);
+        alert("Network error.");
+      }
+    }
+
+    document.getElementById("employeeId").addEventListener("input", renderTable);
+    document.getElementById("filterStatus").addEventListener("change", renderTable);
+    document.getElementById("filterDate").addEventListener("change", renderTable);
+
+    loadTodayData();
+  </script>
+</body>
+</html>
